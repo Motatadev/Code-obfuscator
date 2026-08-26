@@ -369,6 +369,48 @@ type examples\example.obf.js
 
 ---
 
+## 🛡️ Windows Defender / Antivirus — False Positive
+
+Any obfuscator is flagged as `HackTool:Win32/Obfuscator` or `PUA` by heuristic — this is **expected** and not a virus. The binary is open-source, MIT, and does not contain malware.
+
+### Why it triggers
+- Name contains `obfuscator`, strings like `xor`, `aes`, `base64`, `virtualProtect` patterns
+- Heuristic sees string-encoding loops as packing
+
+### How we make it Defender-friendly (since v1.0)
+- `src/version.rc` + `src/app.manifest` embedded: Company `Motatadev`, FileDescription `Legitimate Developer Tool`, Copyright MIT
+- `/MANIFEST:EMBED` and version resource reduce `WS.Reputation.1`
+- No network, no injection, no persistence — fully offline
+
+### How to allow it (choose one)
+
+**Option 1 — One-click script (Admin):**
+```powershell
+# Right-click PowerShell -> Run as Administrator
+Set-ExecutionPolicy Bypass -Scope Process -Force
+.\allow_defender.ps1
+# Adds exclusion for build\ and obfuscator.exe
+```
+
+**Option 2 — Manual:**
+```powershell
+# Run as Administrator
+Add-MpPreference -ExclusionPath "C:\path\to\Code-obfuscator\build"
+Add-MpPreference -ExclusionPath "C:\path\to\Code-obfuscator"
+Add-MpPreference -ExclusionProcess "obfuscator.exe"
+Get-MpPreference | Select-Object -ExpandProperty ExclusionPath
+```
+
+**Option 3 — Windows Security GUI:**
+`Windows Security -> Virus & threat protection -> Manage settings -> Exclusions -> Add folder` → select `build`
+
+**Option 4 — Submit false positive to Microsoft:**
+https://www.microsoft.com/wdsi/filesubmission → `I believe this file should not be detected` → upload `obfuscator.exe` → Microsoft whitelists within 24-48h.
+
+> If corporate Device Guard (WDAC) blocks: `AppControl` (WDAC) blocks unsigned EXEs in `Downloads`. Move repo to `C:\Tools\Code-obfuscator` or sign with self-signed cert: `New-SelfSignedCertificate` + `signtool`.
+
+---
+
 ## 🤝 Contributing
 
 ```bash

@@ -11,6 +11,13 @@ add_executable(obfuscator
     src/encodings.cpp
 )
 
+if(WIN32)
+    # Embed version info and manifest (reduces Defender false positives)
+    if(MSVC)
+        target_sources(obfuscator PRIVATE src/version.rc)
+    endif()
+endif()
+
 if(MSVC)
     target_compile_options(obfuscator PRIVATE /W4 /O2)
 else()
