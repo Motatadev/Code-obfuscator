@@ -20,7 +20,7 @@ void Obfuscator::buildPreservedSet() {
     // Always preserve language keywords (already handled) and common builtins
     // Add extra preserves for level light: don't rename short names? No
     // Common entry points
-    std::vector<std::string> extra = {"main","Main","__main__","__name__","__init__","constructor","printf","scanf","cout","cin","include","define","import","from","require","module","exports","console","log","print","len","range","str","int","float","list","dict"};
+    std::vector<std::string> extra = {"main","Main","__main__","__name__","__init__","__import__","constructor","printf","scanf","cout","cin","include","define","import","from","require","module","exports","console","log","print","len","range","str","int","float","list","dict","base64","urllib","codecs","html","json","discord","aiohttp","asyncio","logging","typing","Optional","app_commands"};
     for (auto &s: extra) preserved.insert(s);
 
     // For JS/Python/C#, preserve 'self', 'this', 'super'
@@ -45,16 +45,79 @@ std::string Obfuscator::generateObfuscatedName() {
 }
 
 void Obfuscator::collectIdentifiers(const std::vector<Token>& tokens) {
-    // Count frequencies to prioritize most common? Simple collect unique
+    // First, collect import targets and keyword args to preserve (for runnable Python)
+    std::unordered_set<std::string> importPreserved;
+    std::unordered_set<std::string> kwPreserved;
+    for (size_t i=0;i<tokens.size();++i){
+        if(tokens[i].type!=TokenType::Identifier) continue;
+        int prev=-1;
+        for(int j=(int)i-1;j>=0;--j){
+            if(tokens[j].type==TokenType::Whitespace || tokens[j].type==TokenType::Newline || tokens[j].type==TokenType::Comment) continue;
+            prev=j; break;
+        }
+        int next=-1;
+        for(size_t j=i+1;j<tokens.size();++j){
+            if(tokens[j].type==TokenType::Whitespace || tokens[j].type==TokenType::Comment) continue;
+            if(tokens[j].type==TokenType::Newline) break;
+            next=(int)j; break;
+        }
+        bool isImportTarget=false;
+        if(prev>=0 && tokens[prev].type==TokenType::Keyword && (tokens[prev].value=="import" || tokens[prev].value=="from")) isImportTarget=true;
+        else if(prev>=0 && tokens[prev].type==TokenType::Symbol && tokens[prev].value==","){
+            for(int k=prev;k>=0;--k){
+                if(tokens[k].type==TokenType::Newline) break;
+                if(tokens[k].type==TokenType::Keyword && (tokens[k].value=="import" || tokens[k].value=="from")){ isImportTarget=true; break; }
+            }
+        }
+        if(prev>=0 && tokens[prev].type==TokenType::Symbol && tokens[prev].value=="."){
+            if(lang.name=="python" || lang.name=="lua") isImportTarget=true;
+        }
+        if(isImportTarget) importPreserved.insert(tokens[i].value);
+
+        // Keyword args / assigns: identifier before = or : -> preserve globally for Python to keep calls runnable
+        if(next>=0 && tokens[next].type==TokenType::Symbol && (tokens[next].value=="=" || tokens[next].value==":")){
+            if(lang.name=="python"){
+                kwPreserved.insert(tokens[i].value);
+            }
+        }
+    }
+    for(auto &s: importPreserved) preserved.insert(s);
+    for(auto &s: kwPreserved) preserved.insert(s);
+
     std::unordered_set<std::string> seen;
-    for (auto &t: tokens) {
+    for (size_t i=0;i<tokens.size();++i){
+        auto &t = tokens[i];
         if (t.type != TokenType::Identifier) continue;
         const std::string &name = t.value;
         if (preserved.find(name)!=preserved.end()) continue;
-        // Skip single letter loop vars maybe? But obfuscate anyway if level >=2
-        // Skip ALL_CAPS macros (likely constants)
+        if (importPreserved.find(name)!=importPreserved.end()) continue;
+        // Skip if after dot (attribute) - already preserved via importPreserved check, but double check
+        int prev=-1;
+        for(int j=(int)i-1;j>=0;--j){
+            if(tokens[j].type==TokenType::Whitespace || tokens[j].type==TokenType::Newline || tokens[j].type==TokenType::Comment) continue;
+            prev=j; break;
+        }
+        if(prev>=0 && tokens[prev].type==TokenType::Symbol && tokens[prev].value=="."){
+            if(lang.name=="python") continue;
+        }
+        // Skip if previous is import/from (extra safety)
+        if(prev>=0 && tokens[prev].type==TokenType::Keyword && (tokens[prev].value=="import" || tokens[prev].value=="from")) continue;
+        // Skip keyword arguments: identifier directly before = or : (e.g., level=, format=, nom: Optional)
+        int next=-1;
+        for(size_t j=i+1;j<tokens.size();++j){
+            if(tokens[j].type==TokenType::Whitespace || tokens[j].type==TokenType::Comment) continue;
+            // Newline ends the check
+            if(tokens[j].type==TokenType::Newline) break;
+            next=(int)j; break;
+        }
+        if(next>=0 && tokens[next].type==TokenType::Symbol && (tokens[next].value=="=" || tokens[next].value==":")){
+            // Distinguish assignment vs keyword arg: if inside parentheses, it's kwarg/type hint; else assignment.
+            // For safety, preserve all with =/: to keep API calls working (level=, format=, etc.)
+            // For Python, preserve to avoid breaking calls like basicConfig(level=...)
+            if(lang.name=="python") continue;
+        }
+
         if (opts.preserveMain && name=="main") continue;
-        // Skip if looks like constant (ALL_CAPS with underscores) for level 1
         if (opts.level ==1) {
             bool isConst = true;
             for (char c: name) if (!std::isupper((unsigned char)c) && c!='_' && !std::isdigit((unsigned char)c)) { isConst=false; break; }
@@ -66,7 +129,6 @@ void Obfuscator::collectIdentifiers(const std::vector<Token>& tokens) {
         do {
             obf = generateObfuscatedName();
         } while (preserved.find(obf)!=preserved.end());
-        // Ensure uniqueness
         bool alreadyUsed = false;
         for (auto &kv: identMap) if (kv.second==obf) { alreadyUsed=true; break; }
         if (alreadyUsed) obf = obf + std::to_string(rng()%1000);
@@ -103,9 +165,72 @@ std::string Obfuscator::obfuscateStringContent(const std::string& tokenValue) {
 
     if (content.empty()) return tokenValue;
 
+    // Handle Python f-strings: rename identifiers inside { } but don't encode the string
+    if (lang.name=="python") {
+        size_t p=0;
+        while (p<tokenValue.size() && (tokenValue[p]=='f'||tokenValue[p]=='F'||tokenValue[p]=='r'||tokenValue[p]=='R'||tokenValue[p]=='b'||tokenValue[p]=='B'||tokenValue[p]=='u'||tokenValue[p]=='U')) p++;
+        if (p>0 && p<tokenValue.size() && (tokenValue[p]=='"' || tokenValue[p]=='\'')) {
+            bool isF=false; for(size_t k=0;k<p;++k) if(tokenValue[k]=='f'||tokenValue[k]=='F') isF=true;
+            if(isF){
+                // For f-strings, rename variables inside {} using identMap and return
+                std::string result = tokenValue;
+                // Replace each identifier inside braces
+                for(auto &kv: identMap){
+                    std::string from = kv.first;
+                    std::string to = kv.second;
+                    // Find { ... from ... } - simple replace of {from} or {from.} etc.
+                    // Use search for {from and from} inside
+                    size_t pos=0;
+                    while((pos=result.find(from, pos))!=std::string::npos){
+                        // Check if inside braces: look for { before and } after
+                        size_t open = result.rfind('{', pos);
+                        size_t close = result.find('}', pos);
+                        if(open!=std::string::npos && close!=std::string::npos && open<pos && pos<close){
+                            // Ensure word boundaries
+                            bool leftOk = (pos==0 || !std::isalnum((unsigned char)result[pos-1]) && result[pos-1]!='_');
+                            bool rightOk = (pos+from.size()>=result.size() || !std::isalnum((unsigned char)result[pos+from.size()]) && result[pos+from.size()]!='_');
+                            if(leftOk && rightOk){
+                                result.replace(pos, from.size(), to);
+                                pos+=to.size();
+                                continue;
+                            }
+                        }
+                        pos+=from.size();
+                    }
+                }
+                return result;
+            }
+        }
+    }
+
     // Custom encoding override: use requested encoding (from --encode)
     if (opts.stringEncoding != "default" && encodings::isValidEncoding(opts.stringEncoding)) {
-        // For includes, still skip if raw looks like header
+        // Skip f-strings for custom encoding (already handled above, but double check)
+        if (lang.name=="python") {
+            size_t p=0;
+            while (p<tokenValue.size() && (tokenValue[p]=='f'||tokenValue[p]=='F'||tokenValue[p]=='r'||tokenValue[p]=='R'||tokenValue[p]=='b'||tokenValue[p]=='B'||tokenValue[p]=='u'||tokenValue[p]=='U')) p++;
+            if (p>0 && p<tokenValue.size() && (tokenValue[p]=='"' || tokenValue[p]=='\'')) {
+                bool isF=false; for(size_t k=0;k<p;++k) if(tokenValue[k]=='f'||tokenValue[k]=='F') isF=true;
+                if(isF){
+                    // Already handled above, but return with renamed braces
+                    std::string result = tokenValue;
+                    for(auto &kv: identMap){
+                        size_t pos=0;
+                        while((pos=result.find(kv.first, pos))!=std::string::npos){
+                            size_t open = result.rfind('{', pos);
+                            size_t close = result.find('}', pos);
+                            if(open!=std::string::npos && close!=std::string::npos && open<pos && pos<close){
+                                bool leftOk = (pos==0 || !std::isalnum((unsigned char)result[pos-1]) && result[pos-1]!='_');
+                                bool rightOk = (pos+kv.first.size()>=result.size() || !std::isalnum((unsigned char)result[pos+kv.first.size()]) && result[pos+kv.first.size()]!='_');
+                                if(leftOk && rightOk){ result.replace(pos, kv.first.size(), kv.second); pos+=kv.second.size(); continue; }
+                            }
+                            pos+=kv.first.size();
+                        }
+                    }
+                    return result;
+                }
+            }
+        }
         return encodings::encodeString(content, opts.stringEncoding, lang.name, opts.caesarShift, opts.xorKey, opts.vigenereKey);
     }
 

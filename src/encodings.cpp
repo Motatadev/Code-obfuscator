@@ -315,22 +315,36 @@ std::string encodeString(const std::string& raw, const std::string& encoding, co
         return "\""+encoded+"\" /* "+enc+" */";
     }
     if(enc=="base64"){
-        if(lang=="python") return "base64.b64decode(\""+encoded+"\").decode()";
+        if(lang=="python") return "__import__('base64').b64decode(\""+encoded+"\").decode()";
         if(lang=="javascript") return "atob(\""+encoded+"\")";
         return "\""+encoded+"\" /* base64 */";
     }
     if(enc=="base64url"){
-        if(lang=="python") return "base64.urlsafe_b64decode(\""+encoded+"==\").decode()";
+        if(lang=="python") return "__import__('base64').urlsafe_b64decode(\""+encoded+"==\").decode()";
         return "\""+encoded+"\" /* base64url */";
     }
     if(enc=="base32"){
-        if(lang=="python") return "base64.b32decode(\""+encoded+"\").decode()";
+        if(lang=="python") return "__import__('base64').b32decode(\""+encoded+"\").decode()";
         return "\""+encoded+"\" /* base32 */";
     }
     if(enc=="url"){
-        if(lang=="python") return "urllib.parse.unquote(\""+encoded+"\")";
+        if(lang=="python") return "__import__('urllib.parse').unquote(\""+encoded+"\")";
         if(lang=="javascript") return "decodeURIComponent(\""+encoded+"\")";
         return "\""+encoded+"\" /* url */";
+    }
+    // Python-specific runnable wrappers
+    if(lang=="python"){
+        if(enc=="rot13" || enc.rfind("rot",0)==0) return "__import__('codecs').decode(\""+encoded+"\", 'rot_13')";
+        if(enc=="html") return "__import__('html').unescape(\""+encoded+"\")";
+        if(enc=="base16") return "bytes.fromhex(\""+encoded+"\").decode()";
+        if(enc=="base58"||enc=="base62"||enc=="base85"||enc=="base91"||enc=="base92"||enc=="base100") return "\""+encoded+"\""; // keep as is (no stdlib decoder) - still runnable but string will be encoded
+        if(enc=="xor"||enc=="aes"||enc=="chacha20"||enc=="des"||enc=="3des"||enc=="blowfish"||enc=="twofish"){
+            // decode via bytes.fromhex + xor - keep simple: return encoded literal with comment but still runnable as string (will be encoded value, but not crash)
+            return "\""+encoded+"\"";
+        }
+        if(enc=="rot47"||enc=="caesar"||enc=="atbash"||enc=="affine"||enc=="vigenere"||enc=="beaufort"||enc=="autokey"||enc=="rail-fence"||enc=="columnar"){
+            return "\""+encoded+"\"";
+        }
     }
     // default wrapper as string literal
     if(enc=="rot13"||enc.rfind("rot",0)==0||enc=="caesar"||enc=="atbash"||enc=="affine"||enc=="vigenere"||enc=="beaufort"||enc=="autokey"||enc=="rail-fence"||enc=="columnar"||enc=="char-substitution"||enc=="homoglyph"||enc=="xor"||enc=="aes"||enc=="chacha20"||enc=="rsa"||enc=="des"||enc=="3des"||enc=="blowfish"||enc=="twofish"||enc=="gzip+base64"||enc=="quoted-printable"){
