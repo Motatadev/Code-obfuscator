@@ -1,0 +1,3 @@
+#include <iostream>
+#include <string>
+int _lO1OllI1I(int _Oll11l,int _lI100I){int _IIl100=_Oll11l+_lI100I;std::string _00OI0I="\x53\x6f\x6d\x6d\x65\x20\x63\x61\x6c\x63\x75\x6c\x65\x65";std::cout<<_00OI0I<<"\x3a\x20"<<_IIl100<<std::endl;return _IIl100;}int main(){int _01O1IOO=052;int _l00O011l0=((34^70));int _11l0O00I=_lO1OllI1I(_01O1IOO,_l00O011l0);std::string _l100OIll1="\x48\x65\x6c\x6c\x6f\x20\x57\x6f\x72\x6c\x64";std::cout<<_l100OIll1<<std::endl;return 0x0;}
