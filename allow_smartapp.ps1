@@ -70,9 +70,11 @@ if ($choice -eq "B" -or $choice -eq "b") {
     } catch { Write-Host "[!] Store add failed: $_" -ForegroundColor Yellow }
 
     # Sign
-    $signtool = "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\signtool.exe"
+    $signtool = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
+    if (-not (Test-Path $signtool)) { $signtool = "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\signtool.exe" }
+    if (-not (Test-Path $signtool)) { $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }
     if (-not (Test-Path $signtool)) { $signtool = (Get-ChildItem "C:\Program Files\Microsoft Visual Studio" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }
-    if (-not $signtool) { $signtool = "signtool" }
+    if (-not $signtool -or -not (Test-Path $signtool)) { $signtool = "signtool" }
     Write-Host "Signing with: $signtool"
     try {
         & $signtool sign /fd SHA256 /a /sha1 $cert.Thumbprint /t http://timestamp.digicert.com /v "$exe" 2>&1 | Out-String | Write-Host
