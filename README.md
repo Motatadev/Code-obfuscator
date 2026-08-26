@@ -303,6 +303,42 @@ echo 'print("hi")' | obfuscator --lang python --encode rot13
 
 ---
 
+## ✅ How to Make It Work — Runnable Guarantee
+
+Obfuscation must keep the program **runnable**. This tool does it automatically:
+
+**What is preserved (not renamed):**
+- `import X` / `from X import Y` — module names (`discord`, `aiohttp`, `base64`)
+- `obj.attr` — attributes after `.` (`discord.Client`, `logging.INFO`, `TimeoutError`) for Python/Lua
+- `func(kw=...)` / `var: Type` — keyword arguments and type hints (`level=`, `intents=`, `title=`) globally preserved so `Client(intents=...)` still matches
+- `f"{VAR}"` — f-strings keep `f` prefix and `VAR` inside `{}` is renamed via `identMap` → `f"{_obf}"`
+- `def setup_hook / on_ready / close` — `discord.Client` overrides kept
+
+**String wrappers are self-contained:**
+- `base64` (Python) → `__import__('base64').b64decode("...").decode()` (no `import base64` needed)
+- `base32` → `__import__('base64').b32decode(...).decode()`
+- `url` → `__import__('urllib.parse').unquote(...)`
+- `rot13` → `__import__('codecs').decode("...", 'rot_13')`
+- `hex-escape` → `"\x48\x65..."` (same value, no decode needed)
+- `f"..."` → left as is (expressions not encoded)
+
+**If your script still fails:**
+```powershell
+# 1. Use safe mode for complex Python (keeps more names, still obfuscated):
+.\build\obfuscator.exe -i bot.py -o bot.obf.py --encode hex-escape --level 1
+
+# 2. Or disable renaming entirely (only strings/numbers):
+.\build\obfuscator.exe -i bot.py -o bot.obf.py --no-rename --encode base64
+
+# 3. Test quickly:
+py -m py_compile bot.obf.py  # must print no error
+py bot.obf.py                # must reach "Shard has connected" / same as original
+```
+
+All examples in `examples/` are tested runnable after obfuscation.
+
+---
+
 ## 🔧 How It Works
 
 1. **Language detection** — `language.cpp` maps extensions to profiles (keywords, comments, delimiters). See `src/language.hpp:10`.
